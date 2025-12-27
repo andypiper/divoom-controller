@@ -21,8 +21,10 @@ Protocol documentation from RomRider's node-divoom-timebox-evo.
 """
 
 import math
+import re
 import socket
 import struct
+import subprocess
 import sys
 import sysconfig
 from binascii import hexlify, unhexlify
@@ -33,7 +35,7 @@ from pathlib import Path
 from typing import Optional
 
 import click
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import track
@@ -222,6 +224,147 @@ class DivoomProtocol:
         full_encoded = header + encoded
 
         return unhexlify(full_encoded)
+
+
+# ============================================================================
+# Device Discovery
+# ============================================================================
+
+
+def discover_bluetooth_devices(timeout: int = 10) -> list[dict[str, str]]:
+    """
+    Scan for Bluetooth devices.
+
+    Args:
+        timeout: Scan duration in seconds
+
+    Returns:
+        List of discovered devices with 'name' and 'address' keys
+    """
+    devices = []
+    try:
+        # Try using bluetoothctl for device discovery
+        result = subprocess.run(
+            ["bluetoothctl", "--timeout", str(timeout), "scan", "on"],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 5,
+        )
+
+        # Parse output for device information
+        # Format: [NEW] Device XX:XX:XX:XX:XX:XX Device Name
+        pattern = r"\[(?:NEW|CHG)\]\s+Device\s+([0-9A-F:]{17})\s+(.+)"
+        for line in result.stdout.split("\n"):
+            match = re.search(pattern, line, re.IGNORECASE)
+            if match:
+                address = match.group(1)
+                name = match.group(2).strip()
+                # Avoid duplicates
+                if not any(d["address"] == address for d in devices):
+                    devices.append({"address": address, "name": name})
+
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        # Fallback: try hcitool if bluetoothctl not available
+        try:
+            result = subprocess.run(
+                ["hcitool", "scan"], capture_output=True, text=True, timeout=timeout
+            )
+            # Format: XX:XX:XX:XX:XX:XX  Device Name
+            pattern = r"([0-9A-F:]{17})\s+(.+)"
+            for line in result.stdout.split("\n")[1:]:  # Skip header
+                match = re.search(pattern, line, re.IGNORECASE)
+                if match:
+                    devices.append(
+                        {"address": match.group(1), "name": match.group(2).strip()}
+                    )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    return devices
+
+
+def find_divoom_devices(timeout: int = 10) -> list[dict[str, str]]:
+    """
+    Scan for Divoom devices specifically.
+
+    Args:
+        timeout: Scan duration in seconds
+
+    Returns:
+        List of Divoom devices found
+    """
+    all_devices = discover_bluetooth_devices(timeout)
+    divoom_devices = [
+        d
+        for d in all_devices
+        if "divoom" in d["name"].lower() or "timebox" in d["name"].lower()
+    ]
+    return divoom_devices
+
+
+# ============================================================================
+# Text Rendering
+# ============================================================================
+
+
+def render_text_to_pixels(
+    text: str,
+    width: int = 16,
+    height: int = 16,
+    color: tuple[int, int, int] = (255, 255, 255),
+    background: tuple[int, int, int] = (0, 0, 0),
+    font_size: int = 8,
+) -> list[int]:
+    """
+    Render text to pixel data for display.
+
+    Args:
+        text: Text to render
+        width: Image width in pixels
+        height: Image height in pixels
+        color: Text color (R, G, B)
+        background: Background color (R, G, B)
+        font_size: Font size (default 8 works well for 16x16)
+
+    Returns:
+        List of pixel colors as integers
+    """
+    # Create image
+    img = Image.new("RGB", (width, height), background)
+    draw = ImageDraw.Draw(img)
+
+    # Try to use a built-in font, fall back to default
+    try:
+        # Try to load a basic font
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+    except (OSError, IOError):
+        try:
+            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+        except (OSError, IOError):
+            # Use default font
+            font = ImageFont.load_default()
+
+    # Get text bounding box to center it
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+
+    # Center text
+    x = (width - text_width) // 2
+    y = (height - text_height) // 2
+
+    # Draw text
+    draw.text((x, y), text, fill=color, font=font)
+
+    # Convert to pixel data
+    pixel_data = []
+    for py in range(height):
+        for px in range(width):
+            r, g, b = img.getpixel((px, py))
+            pixel_color = (r << 16) | (g << 8) | b
+            pixel_data.append(pixel_color)
+
+    return pixel_data
 
 
 # ============================================================================
@@ -592,6 +735,31 @@ class DivoomTimeboxEvo:
         encoded = DivoomProtocol.encode_image(pixel_data)
         self._send_command(Command.SET_BOX_COLOR, encoded)
 
+    def display_text(
+        self,
+        text: str,
+        color: tuple[int, int, int] = (255, 255, 255),
+        background: tuple[int, int, int] = (0, 0, 0),
+        font_size: int = 8,
+    ) -> None:
+        """
+        Display text on the device.
+
+        Args:
+            text: Text to display
+            color: Text color (R, G, B)
+            background: Background color (R, G, B)
+            font_size: Font size (8 works well for 16x16)
+        """
+        # Render text to pixels
+        pixel_data = render_text_to_pixels(
+            text, color=color, background=background, font_size=font_size
+        )
+
+        # Encode and send
+        encoded = DivoomProtocol.encode_image(pixel_data)
+        self._send_command(Command.SET_BOX_COLOR, encoded)
+
     def __enter__(self):
         """Context manager entry."""
         self.connect()
@@ -634,7 +802,7 @@ def validate_mac_address(ctx, param, value):
 @click.option(
     "--mac",
     "-m",
-    required=True,
+    required=False,  # Not required for scan command
     callback=validate_mac_address,
     help="Device MAC address (XX:XX:XX:XX:XX:XX)",
 )
@@ -651,11 +819,20 @@ def cli(ctx, mac, timeout):
     ctx.obj["timeout"] = timeout
 
 
+def require_mac(ctx):
+    """Validate that MAC address is provided."""
+    if not ctx.obj.get("mac"):
+        console.print("[red]✗[/red] Error: --mac option is required for this command", style="bold red")
+        console.print("[dim]Tip: Use 'scan' command to find your device's MAC address[/dim]")
+        sys.exit(1)
+
+
 @cli.command()
 @click.argument("brightness", type=click.IntRange(0, 100))
 @click.pass_context
 def brightness(ctx, brightness):
     """Set display brightness (0-100)."""
+    require_mac(ctx)
     try:
         with DivoomTimeboxEvo(ctx.obj["mac"], ctx.obj["timeout"]) as device:
             device.set_brightness(brightness)
@@ -897,6 +1074,70 @@ def info(ctx):
     table.add_row("Repository", "https://github.com/andypiper/divoom-controller")
 
     console.print(table)
+
+
+@cli.command()
+@click.option(
+    "--timeout", "-t", default=10, help="Scan duration in seconds", type=int
+)
+def scan(timeout):
+    """Scan for Divoom Bluetooth devices."""
+    console.print(f"[bold]Scanning for Divoom devices...[/bold] ({timeout}s)")
+
+    with console.status("[bold green]Scanning..."):
+        devices = find_divoom_devices(timeout)
+
+    if not devices:
+        console.print("[yellow]No Divoom devices found.[/yellow]")
+        console.print("\n[dim]Tip: Make sure your device is powered on and in pairing mode.[/dim]")
+        return
+
+    table = Table(title=f"Found {len(devices)} Divoom Device(s)")
+    table.add_column("Name", style="cyan")
+    table.add_column("MAC Address", style="green")
+
+    for device in devices:
+        table.add_row(device["name"], device["address"])
+
+    console.print(table)
+    console.print(
+        f"\n[dim]Use --mac [green]{devices[0]['address']}[/green] to connect to the first device[/dim]"
+    )
+
+
+@cli.command()
+@click.argument("text")
+@click.option("--color", "-c", default="255,255,255", help="Text color (R,G,B)")
+@click.option("--background", "-bg", default="0,0,0", help="Background color (R,G,B)")
+@click.option("--font-size", "-s", default=8, type=int, help="Font size (default: 8)")
+@click.pass_context
+def text(ctx, text, color, background, font_size):
+    """Display text on the device."""
+    # Parse colors
+    try:
+        color_rgb = tuple(map(int, color.split(",")))
+        bg_rgb = tuple(map(int, background.split(",")))
+
+        if len(color_rgb) != 3 or len(bg_rgb) != 3:
+            raise ValueError("Colors must have 3 values (R,G,B)")
+
+        for val in color_rgb + bg_rgb:
+            if not 0 <= val <= 255:
+                raise ValueError("Color values must be 0-255")
+
+    except ValueError as e:
+        console.print(f"[red]✗[/red] Invalid color format: {e}", style="bold red")
+        console.print("[dim]Use format: R,G,B (e.g., 255,0,0 for red)[/dim]")
+        sys.exit(1)
+
+    try:
+        with DivoomTimeboxEvo(ctx.obj["mac"], ctx.obj["timeout"]) as device:
+            with console.status("[bold green]Rendering and sending text..."):
+                device.display_text(text, color=color_rgb, background=bg_rgb, font_size=font_size)
+        console.print(f'[green]✓[/green] Text "{text}" displayed')
+    except Exception as e:
+        console.print(f"[red]✗[/red] Error: {e}", style="bold red")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

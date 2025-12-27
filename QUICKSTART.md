@@ -40,7 +40,10 @@ uv run ./divoom-timebox-evo.py --mac XX:XX:XX:XX:XX:XX brightness 50
 # Show current time
 uv run ./divoom-timebox-evo.py --mac XX:XX:XX:XX:XX:XX time
 
-# Display a colorful clock
+# Display a simple HH:MM clock (no distractions)
+uv run ./divoom-timebox-evo.py --mac XX:XX:XX:XX:XX:XX clock --minimal
+
+# Or a colorful clock
 uv run ./divoom-timebox-evo.py --mac XX:XX:XX:XX:XX:XX clock --style rainbow
 ```
 
@@ -73,7 +76,10 @@ divoom light 255 0 0
 # Pulsing blue light
 divoom light 0 0 255 --effect pulse
 
-# Clock with weather
+# Simple HH:MM clock (minimal mode)
+divoom clock --minimal
+
+# Clock with weather and temperature
 divoom clock --weather --temperature
 
 # Audio visualizer

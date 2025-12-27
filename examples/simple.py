@@ -24,14 +24,16 @@ with DivoomTimeboxEvo(MAC_ADDRESS) as device:
     # Sync the time
     device.set_time()
 
-    # Show a fullscreen clock
+    # Show a simple HH:MM clock (widescreen style, no extras)
+    # This is the least distracting option
     device.set_clock(
-        style=ClockStyle.FULLSCREEN,
+        style=ClockStyle.WIDESCREEN,
         red=255,
         green=255,
         blue=255,
-        show_weather=True,
-        show_temperature=True,
+        show_weather=False,
+        show_temperature=False,
+        show_date=False,
     )
 
 print("Device configured successfully!")

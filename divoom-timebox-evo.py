@@ -465,10 +465,13 @@ class DivoomTimeboxEvo:
             show_temperature: Show temperature
             show_date: Show date
         """
-        options = bytes(
+        # Protocol: [BoxMode, SubMode, ClockStyle, ClockEnabled, Weather, Temp, Date, R, G, B]
+        payload = bytes(
             [
-                style.value,
-                1,  # Clock enabled
+                BoxMode.CLOCK.value,  # 0 - Clock/ENV mode
+                1,  # Submode - seems to always be 1 for clock
+                style.value,  # Clock style
+                1,  # Clock display enabled
                 int(show_weather),
                 int(show_temperature),
                 int(show_date),
@@ -477,7 +480,7 @@ class DivoomTimeboxEvo:
                 blue & 0xFF,
             ]
         )
-        self.switch_channel(BoxMode.CLOCK, options)
+        self._send_command(Command.SET_BOX_MODE, payload)
 
     def set_lighting(
         self,
@@ -710,17 +713,31 @@ def light(ctx, red, green, blue, effect, brightness):
         case_sensitive=False,
     ),
     default="fullscreen",
-    help="Clock style",
+    help="Clock style (fullscreen/widescreen are simplest)",
 )
 @click.option("--red", "-r", type=click.IntRange(0, 255), default=255, help="Red")
 @click.option("--green", "-g", type=click.IntRange(0, 255), default=255, help="Green")
 @click.option("--blue", "-b", type=click.IntRange(0, 255), default=255, help="Blue")
-@click.option("--weather", is_flag=True, help="Show weather")
+@click.option("--weather", is_flag=True, help="Show weather icon")
 @click.option("--temperature", is_flag=True, help="Show temperature")
 @click.option("--date", is_flag=True, help="Show date")
+@click.option(
+    "--minimal",
+    is_flag=True,
+    help="Minimal clock (HH:MM only, no extras, widescreen style)",
+)
 @click.pass_context
-def clock(ctx, style, red, green, blue, weather, temperature, date):
-    """Set clock display mode."""
+def clock(ctx, style, red, green, blue, weather, temperature, date, minimal):
+    """
+    Set clock display mode.
+
+    For a simple HH:MM display, use: --minimal
+
+    Examples:
+      Simple time only: --minimal
+      With weather:     --weather --temperature
+      Analog clock:     --style analog-round
+    """
     style_map = {
         "fullscreen": ClockStyle.FULLSCREEN,
         "rainbow": ClockStyle.RAINBOW,
@@ -731,12 +748,34 @@ def clock(ctx, style, red, green, blue, weather, temperature, date):
         "widescreen": ClockStyle.WIDESCREEN,
     }
 
+    # Minimal mode overrides everything
+    if minimal:
+        style = "widescreen"
+        weather = False
+        temperature = False
+        date = False
+        red = 255
+        green = 255
+        blue = 255
+
     try:
         with DivoomTimeboxEvo(ctx.obj["mac"], ctx.obj["timeout"]) as device:
             device.set_clock(
                 style_map[style], red, green, blue, weather, temperature, date
             )
-        console.print(f"[green]✓[/green] Clock set to {style} style")
+
+        if minimal:
+            console.print("[green]✓[/green] Clock set to minimal mode (HH:MM only)")
+        else:
+            extras = []
+            if weather:
+                extras.append("weather")
+            if temperature:
+                extras.append("temperature")
+            if date:
+                extras.append("date")
+            extra_text = f" with {', '.join(extras)}" if extras else ""
+            console.print(f"[green]✓[/green] Clock set to {style} style{extra_text}")
     except Exception as e:
         console.print(f"[red]✗[/red] Error: {e}", style="bold red")
         sys.exit(1)

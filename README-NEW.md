@@ -120,8 +120,11 @@ All commands require the `--mac` option with your device's Bluetooth MAC address
 # Set pulsing purple light
 ./divoom-timebox-evo.py --mac 11:75:58:6C:D6:D8 light 128 0 128 --effect pulse
 
-# Show clock with weather
-./divoom-timebox-evo.py --mac 11:75:58:6C:D6:D8 clock --style fullscreen --weather --temperature
+# Show simple HH:MM clock (minimal, no distractions)
+./divoom-timebox-evo.py --mac 11:75:58:6C:D6:D8 clock --minimal
+
+# Show clock with weather and temperature
+./divoom-timebox-evo.py --mac 11:75:58:6C:D6:D8 clock --weather --temperature
 
 # Set audio visualizer
 ./divoom-timebox-evo.py --mac 11:75:58:6C:D6:D8 visualizer 3
@@ -147,11 +150,13 @@ All commands require the `--mac` option with your device's Bluetooth MAC address
   - `--effect` - Choose effect: pulse, cycle, breathing, strobe, solid
   - `--brightness` - Light brightness (0-100)
 - `clock` - Set clock display
+  - `--minimal` - Simple HH:MM only display (recommended for minimal distraction)
   - `--style` - Clock style: fullscreen, rainbow, bordered, analog-square, analog-round, widescreen
   - `--weather` - Show weather icon
   - `--temperature` - Show temperature
   - `--date` - Show date
   - `--red/--green/--blue` - Clock color (0-255)
+  - **Tip:** Use `--minimal` for a clean, simple time display without animations
 - `visualizer <0-11>` - Set audio visualizer mode
 - `scoreboard <blue> <red>` - Set scoreboard (scores 0-999)
 - `weather <temp>` - Set temperature (-128 to 127°C)

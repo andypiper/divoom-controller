@@ -68,12 +68,13 @@ class Command(IntEnum):
 class BoxMode(IntEnum):
     """Display modes for the device."""
 
-    CLOCK = 0
+    CLOCK = 0  # ENV mode
     LIGHT = 1
-    EFFECTS = 2
-    VISUALIZATION = 3
-    SCOREBOARD = 4
-    CUSTOM = 5
+    CLOUD = 2  # HOT mode
+    EFFECTS = 3  # SPECIAL mode
+    VISUALIZER = 4  # MUSIC mode
+    CUSTOM = 5  # USER_DEFINE mode
+    SCOREBOARD = 6  # WATCH mode
 
 
 class ClockStyle(IntEnum):
@@ -513,19 +514,24 @@ class DivoomTimeboxEvo:
             red: Red value (0-255)
             green: Green value (0-255)
             blue: Blue value (0-255)
-            effect: Lighting effect
-            brightness: Brightness (0-100)
+            effect: Lighting effect (not currently used)
+            brightness: Brightness (0-100, not currently used)
         """
-        options = bytes(
-            [
-                red & 0xFF,
-                green & 0xFF,
-                blue & 0xFF,
-                brightness,
-                effect.value,
-            ]
-        )
-        self.switch_channel(BoxMode.LIGHT, options)
+        # Protocol: [BoxMode.LIGHT, R, G, B, 0x14, 0, clock, weather, temp, date]
+        # For solid light mode, we disable clock/weather/temp/date
+        payload = bytes([
+            BoxMode.LIGHT,
+            red & 0xFF,
+            green & 0xFF,
+            blue & 0xFF,
+            0x14,  # Fixed value
+            0,
+            0,  # No clock
+            0,  # No weather
+            0,  # No temperature
+            0,  # No date
+        ])
+        self._send_command(Command.SET_BOX_MODE, payload)
 
     def set_visualizer(self, visualizer_id: int = 0) -> None:
         """
@@ -537,8 +543,9 @@ class DivoomTimeboxEvo:
         if not 0 <= visualizer_id <= 11:
             raise ValueError("Visualizer ID must be between 0 and 11")
 
-        options = bytes([visualizer_id])
-        self.switch_channel(BoxMode.VISUALIZATION, options)
+        # Protocol: [BoxMode.VISUALIZER, viz_id, 0, 0, 0, 0, 0, 0, 0, 0]
+        payload = bytes([BoxMode.VISUALIZER, visualizer_id & 0xFF] + [0] * 8)
+        self._send_command(Command.SET_BOX_MODE, payload)
 
     def set_scoreboard(self, blue_score: int, red_score: int) -> None:
         """
@@ -551,15 +558,14 @@ class DivoomTimeboxEvo:
         if not 0 <= blue_score <= 999 or not 0 <= red_score <= 999:
             raise ValueError("Scores must be between 0 and 999")
 
-        options = bytes(
-            [
-                red_score & 0xFF,
-                (red_score >> 8) & 0xFF,
-                blue_score & 0xFF,
-                (blue_score >> 8) & 0xFF,
-            ]
-        )
-        self.switch_channel(BoxMode.SCOREBOARD, options)
+        rs_lo = red_score & 0xFF
+        rs_hi = (red_score >> 8) & 0xFF
+        bs_lo = blue_score & 0xFF
+        bs_hi = (blue_score >> 8) & 0xFF
+
+        # Protocol: [BoxMode.SCOREBOARD, 0, red_lo, red_hi, blue_lo, blue_hi, 0, 0, 0, 0]
+        payload = bytes([BoxMode.SCOREBOARD, 0, rs_lo, rs_hi, bs_lo, bs_hi, 0, 0, 0, 0])
+        self._send_command(Command.SET_BOX_MODE, payload)
 
     def display_image(self, image_path: str, size: int = 16) -> None:
         """

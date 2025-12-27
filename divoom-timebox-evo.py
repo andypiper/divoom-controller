@@ -49,7 +49,7 @@ class Command(IntEnum):
 
     SET_TIME = 0x18
     SET_SYSTEM_COLOR = 0x24
-    SEND_APP_NEWEST_TIME = 0x26
+    SEND_APP_NEWEST_TIME = 0x26  # Disable auto mode switching
     SET_24_HOUR = 0x2D
     LIGHT_CURRENT_LEVEL = 0x31
     CHANNEL = 0x45
@@ -443,6 +443,16 @@ class DivoomTimeboxEvo:
         payload = bytes([channel.value]) + options
         self._send_command(Command.CHANNEL, payload)
 
+    def disable_auto_mode_switching(self) -> None:
+        """
+        Disable automatic mode switching.
+
+        The device has a feature that auto-cycles through different modes.
+        This command disables that behavior so it stays in the current mode.
+        """
+        # Send 0 (False) to prevent auto-switching
+        self._send_command(Command.SEND_APP_NEWEST_TIME, bytes([0]))
+
     def set_clock(
         self,
         style: ClockStyle = ClockStyle.FULLSCREEN,
@@ -452,6 +462,7 @@ class DivoomTimeboxEvo:
         show_weather: bool = False,
         show_temperature: bool = False,
         show_date: bool = False,
+        stay_in_mode: bool = True,
     ) -> None:
         """
         Set clock display mode.
@@ -464,7 +475,12 @@ class DivoomTimeboxEvo:
             show_weather: Show weather icon
             show_temperature: Show temperature
             show_date: Show date
+            stay_in_mode: Prevent auto-switching to other modes (default: True)
         """
+        # Disable auto-mode switching first if requested
+        if stay_in_mode:
+            self.disable_auto_mode_switching()
+
         # Protocol: [BoxMode, SubMode, ClockStyle, ClockEnabled, Weather, Temp, Date, R, G, B]
         payload = bytes(
             [
